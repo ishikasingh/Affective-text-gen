@@ -1,0 +1,44 @@
+<form method="POST" class="container">
+            <div class="row">
+                <div class="col-25">
+                <label for="fname">Sentence Prefix</label>
+                </div>
+                <div class="col-75">
+                <input type="text" id="fname" name="prefix" placeholder="The exists">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-25">
+                    <label for="fname">Topic</label>
+                </div>
+                <div class="col-75">
+                    <select name=topic>
+                        {% for each in topics %}
+                            <option value="{{each}}">{{each}}</option>
+                        {% endfor %}
+                    </select>
+                </div> 
+            </div>
+
+            <div class="row">
+                <div class="col-25">
+                    <label for="fname">Affect</label>
+                </div>
+                <div class="col-75">
+                    <select name=affect>
+                        {% for each in affects %}
+                            <option value="{{each}}">{{each}}</option>
+                        {% endfor %}
+                    </select>
+                </div> 
+            </div>
+            
+            <div class="row">
+                <input type="range" name="knob" min="0" max="10" value="5"> 
+            </div>
+            <div class="row">
+                <input type="submit">
+            </div>
+            
+        </form>

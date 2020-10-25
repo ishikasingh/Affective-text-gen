@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* {
+  box-sizing: border-box;
+}
+
+input[type=text], select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+}
+input[type=text], textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+  height:100px;
+}
+
+
+label {
+  padding: 12px 12px 12px 0;
+  display: inline-block;
+}
+
+input[type=submit] {
+  background-color: #4CAF50;
+  color: white;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  float: right;
+}
+
+input[type=submit]:hover {
+  background-color: #45a049;
+}
+
+.container {
+  border-radius: 5px;
+  background-color: #f2f2f2;
+  padding: 20px;
+  width:80%;
+  align-self: center;
+  position: relative;
+  margin-left: 10%;
+}
+
+.col-25 {
+  float: left;
+  width: 20%;
+  margin-top: 6px;
+}
+
+.col-75 {
+  float: right;
+  width: 70%;
+  margin-top: 6px;
+  margin-left: 30px;
+}
+
+/* Clear floats after the columns */
+.row:after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+/* Responsive layout - when the screen is less than 600px wide, make the two columns stack on top of each other instead of next to each other */
+@media screen and (max-width: 600px) {
+  .col-25, .col-75, input[type=submit] {
+    width: 100%;
+    margin-top: 0;
+  }
+}
+</style>
+<script>
+    function updateTextInput(val) {
+          document.getElementById('knobValue').value=val/100; 
+        }
+</script>
+
+</head>
+<body>
+
+
+<center><h2>Affect Text Generation</h2></center>
+
+<div class="container">
+    <form method="POST" class="container">
+        <div class="row">
+            <div class="col-25">
+                <div class="row">
+                    <label for="fname">Topic</label>
+                    <select name=topic>
+                        {% for each in topics %}
+                            <option value="{{each}}">{{each}}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="row">
+                    <label for="fname">Affect</label>
+                    <select name=affect>
+                        {% for each in affects %}
+                            <option value="{{each}}">{{each}}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="row">
+                    <label for="fname">Affect Intensity</label>
+                    <input type="range" id="knob" onchange="updateTextInput(this.value);" name="knob" min="0" max="100" value="5"> 
+                    <output id="knobValue">0</output>
+                </div>
+            </div>
+
+            <div class="col-75">
+                <label for="fname">Enter prefix Sentence</label>
+                <input type="text" id="fname" name="prefix" placeholder="The exists">
+            </div>
+        </div>
+        
+        <div class="row">
+            <input type="submit" value="Generate">
+        </div>
+        
+    </form>
+    <p>{{result}}</p>
+</div>
+
+</body>
+</html>

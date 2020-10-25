@@ -16,8 +16,9 @@ from transformers.modeling_gpt2 import GPT2LMHeadModel
 
 from ipywidgets import interact, interactive, fixed, interact_manual
 import ipywidgets as widgets
-
+import warnings
 from utils import *
+warnings.filterwarnings("ignore")
 
 class ClassificationHead(torch.nn.Module):
     """Classification Head for  transformer encoders"""
@@ -239,6 +240,55 @@ def perturb_past(
     return pert_past, new_accumulated_hidden, grad_norms, loss_per_iter
 
 
+def get_classifier(
+        name: Optional[str],
+        class_label: Union[str, int],
+        device: str,
+        verbosity_level: int = REGULAR
+) -> Tuple[Optional[ClassificationHead], Optional[int]]:
+    if name is None:
+        return None, None
+
+    params = DISCRIMINATOR_MODELS_PARAMS[name]
+    classifier = ClassificationHead(
+        class_size=params['class_size'],
+        embed_size=params['embed_size']
+    ).to(device)
+    if "url" in params:
+        resolved_archive_file = cached_path(params["url"])
+    elif "path" in params:
+        resolved_archive_file = params["path"]
+    else:
+        raise ValueError("Either url or path have to be specified "
+                         "in the discriminator model parameters")
+    classifier.load_state_dict(
+        torch.load(resolved_archive_file, map_location=device))
+    classifier.eval()
+
+    if isinstance(class_label, str):
+        if class_label in params["class_vocab"]:
+            label_id = params["class_vocab"][class_label]
+        else:
+            label_id = params["default_class"]
+            if verbosity_level >= REGULAR:
+                print("class_label {} not in class_vocab".format(class_label))
+                print("available values are: {}".format(params["class_vocab"]))
+                print("using default class {}".format(label_id))
+
+    elif isinstance(class_label, int):
+        if class_label in set(params["class_vocab"].values()):
+            label_id = class_label
+        else:
+            label_id = params["default_class"]
+            if verbosity_level >= REGULAR:
+                print("class_label {} not in class_vocab".format(class_label))
+                print("available values are: {}".format(params["class_vocab"]))
+                print("using default class {}".format(label_id))
+
+    else:
+        label_id = params["default_class"]
+
+    return classifier, label_id
 
 def full_text_generation(
         model,
@@ -268,6 +318,9 @@ def full_text_generation(
         verbosity_level=REGULAR,
         **kwargs
 ):
+    classifier, class_id = get_classifier(discrim, class_label, device)
+    # print("bog is here", bag_of_words)
+    # print("affect is: ", bag_of_words_affect)
     bow_indices = []
     bow_indices_affect = []
     if bag_of_words:
@@ -310,8 +363,8 @@ def full_text_generation(
             bow_indices_affect=bow_indices_affect,
             affect_int = affect_int,
             knob = knob,
-            classifier=None,
-            class_label=None,
+            classifier=classifier,
+            class_label=class_id,
             loss_type=loss_type,
             length=length,
             stepsize=stepsize,
@@ -329,6 +382,8 @@ def full_text_generation(
             verbosity_level=verbosity_level
         )
         pert_gen_tok_texts.append(pert_gen_tok_text)
+        if classifier is not None:
+            discrim_losses.append(discrim_loss.data.cpu().numpy())
         losses_in_time.append(loss_in_time)
 
     if device == 'cuda':
@@ -399,7 +454,7 @@ def generate_text_pplm(
     count = 0
     int_score = 0
     for i in range_func:
-        if count == 3:
+        if count == 2:
           break
         # Get past/probs for current output, except for last word
         # Note that GPT takes 2 inputs: past + current_token
@@ -519,6 +574,20 @@ def generate_text_pplm(
     # print("int.. " , output_so_far.tolist()[0][-1])
     return output_so_far, unpert_discrim_loss, loss_in_time
 
+
+def set_generic_model_params(discrim_weights, discrim_meta):
+    if discrim_weights is None:
+        raise ValueError('When using a generic discriminator, '
+                         'discrim_weights need to be specified')
+    if discrim_meta is None:
+        raise ValueError('When using a generic discriminator, '
+                         'discrim_meta need to be specified')
+
+    with open(discrim_meta, 'r') as discrim_meta_file:
+        meta = json.load(discrim_meta_file)
+    meta['path'] = discrim_weights
+    DISCRIMINATOR_MODELS_PARAMS['generic'] = meta
+
 def run_pplm_example(
         pretrained_model="gpt2-medium",
         cond_text="",
@@ -549,7 +618,7 @@ def run_pplm_example(
         no_cuda=False,
         colorama=False,
         verbosity='regular'
-): 
+):
     # set Random seed
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -560,7 +629,20 @@ def run_pplm_example(
     # # set the device
     device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
 
-    # load pretrained model
+    if discrim == 'generic':
+        set_generic_model_params(discrim_weights, discrim_meta)
+
+    if discrim is not None:
+        discriminator_pretrained_model = DISCRIMINATOR_MODELS_PARAMS[discrim][
+            "pretrained_model"
+        ]
+        if pretrained_model != discriminator_pretrained_model:
+            pretrained_model = discriminator_pretrained_model
+            if verbosity_level >= REGULAR:
+                print("discrim = {}, pretrained_model set "
+                "to discriminator's = {}".format(discrim, pretrained_model))
+
+    # # load pretrained model
     model = GPT2LMHeadModel.from_pretrained(
         pretrained_model,
         output_hidden_states=True
@@ -575,8 +657,15 @@ def run_pplm_example(
     for param in model.parameters():
         param.requires_grad = False
 
-    raw_text = cond_text
-    tokenized_cond_text = tokenizer.encode(tokenizer.bos_token + raw_text,add_special_tokens=False)
+    # figure out conditioning text
+    if uncond:
+        tokenized_cond_text = tokenizer.encode([tokenizer.bos_token],add_special_tokens=False)
+    else:
+        raw_text = cond_text
+        while not raw_text:
+            print("Did you forget to add `--cond_text`? ")
+            raw_text = input("Model prompt >>> ")
+        tokenized_cond_text = tokenizer.encode(tokenizer.bos_token + raw_text,add_special_tokens=False)
     print("= Prefix of sentence =")
     # generate unperturbed and perturbed texts
 
@@ -615,18 +704,20 @@ def run_pplm_example(
 
     if verbosity_level >= REGULAR:
         print("=" * 80)
-        print("= Unperturbed generated text =")
-        print(unpert_gen_text)
-        print()
+    print("= Unperturbed generated text =")
+    print(unpert_gen_text)
+    print()
 
     generated_texts = []
-
     pert_gen_text = ""
     # iterate through the perturbed texts
     for i, pert_gen_tok_text in enumerate(pert_gen_tok_texts):
         try:
             # untokenize unperturbed text
             pert_gen_text = tokenizer.decode(pert_gen_tok_text.tolist()[0])
+            print("= Perturbed generated text {} =".format(i + 1))
+            print(pert_gen_text)
+            print()
         except:
             pass
 
