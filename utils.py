@@ -126,6 +126,7 @@ def build_bows_one_hot_vectors(bow_indices, tokenizer, device='cuda'):
 
 def build_bows_one_hot_vectors_aff(bow_indices,affect_int, tokenizer, device='cuda'):
     if bow_indices is None or affect_int is None:
+        print("None bow aff", bow_indices, affect_int)
         return None, None
 
     one_hot_bows_vectors = []

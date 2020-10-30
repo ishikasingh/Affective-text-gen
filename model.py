@@ -1,5 +1,4 @@
 from __future__ import print_function
-
 import argparse
 import json
 from operator import add
@@ -16,9 +15,6 @@ from transformers.modeling_gpt2 import GPT2LMHeadModel
 
 from ipywidgets import interact, interactive, fixed, interact_manual
 import ipywidgets as widgets
-import warnings
-from utils import *
-warnings.filterwarnings("ignore")
 
 class ClassificationHead(torch.nn.Module):
     """Classification Head for  transformer encoders"""
@@ -54,6 +50,67 @@ VERBOSITY_LEVELS = {
     'verbose': VERBOSE,
     'very_verbose': VERY_VERBOSE,
 }
+
+BAG_OF_WORDS_ARCHIVE_MAP = {
+    'legal': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/legal.txt",
+    'military': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/military.txt",
+    'monsters': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/monsters.txt",
+    'politics': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/politics.txt",
+    'positive_words': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/positive_words.txt",
+    'religion': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/religion.txt",
+    'science': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/science.txt",
+    'space': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/space.txt",
+    'technology': "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/bow/technology.txt",
+}
+
+DISCRIMINATOR_MODELS_PARAMS = {
+    "clickbait": {
+        "url": "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/discriminators/clickbait_classifier_head.pt",
+        "class_size": 2,
+        "embed_size": 1024,
+        "class_vocab": {"non_clickbait": 0, "clickbait": 1},
+        "default_class": 1,
+        "pretrained_model": "gpt2-medium",
+    },
+    "sentiment": {
+        "url": "https://s3.amazonaws.com/models.huggingface.co/bert/pplm/discriminators/SST_classifier_head.pt",
+        "class_size": 5,
+        "embed_size": 1024,
+        "class_vocab": {"very_positive": 2, "very_negative": 3},
+        "default_class": 3,
+        "pretrained_model": "gpt2-medium",
+    },
+}
+
+def to_var(x, requires_grad=False, volatile=False, device='cuda'):
+    if torch.cuda.is_available() and device == 'cuda':
+        x = x.cuda()
+    elif device != 'cuda':
+        x = x.to(device)
+    return Variable(x, requires_grad=requires_grad, volatile=volatile)
+
+
+def top_k_filter(logits, k, probs=False):
+    """
+    Masks everything but the k top entries as -infinity (1e10).
+    Used to mask logits such that e^-infinity -> 0 won't contribute to the
+    sum of the denominator.
+    """
+    if k == 0:
+        return logits
+    else:
+        values = torch.topk(logits, k)[0]
+        batch_mins = values[:, -1].view(-1, 1).expand_as(logits)
+        if probs:
+            return torch.where(logits < batch_mins,
+                               torch.ones_like(logits) * 0.0, logits)
+        return torch.where(logits < batch_mins,
+                           torch.ones_like(logits) * -BIG_CONST,
+                           logits)
+
+def gaussian(x, mu, sig):
+  x = np.array(x)
+  return list(np.exp(-0.5*((x-mu)/sig)**2)/(sig*(2*np.pi)**0.5))
 
 def perturb_past(
         past,
@@ -290,6 +347,71 @@ def get_classifier(
 
     return classifier, label_id
 
+
+def get_bag_of_words_indices(bag_of_words_ids_or_paths: List[str], tokenizer) -> \
+        List[List[List[int]]]:
+    bow_indices = []
+    for id_or_path in bag_of_words_ids_or_paths:
+        if id_or_path in BAG_OF_WORDS_ARCHIVE_MAP:
+            filepath = cached_path(BAG_OF_WORDS_ARCHIVE_MAP[id_or_path])
+        else:
+            filepath = id_or_path
+        with open(filepath, "r") as f:
+            words = f.read().strip().split("\n")
+        bow_indices.append(
+            [tokenizer.encode(word.strip(),
+                              add_prefix_space=True,
+                              add_special_tokens=False)
+             for word in words])
+    return bow_indices
+
+def get_affect_words_and_int (affect_class):
+  emotions = "https://raw.githubusercontent.com/ishikasingh/Affective-text-gen/master/NRC-Emotion-Intensity-Lexicon-v1.txt"
+  filepath = cached_path(emotions)
+  with open(filepath, "r") as f:
+      words = f.read().strip().split("\n")[1:]
+  words = [w.split("\t") for w in words]
+  return [w[0] for w in words if w[1] == affect_class], [float(w[-1]) for w in words if w[1] == affect_class]
+
+def build_bows_one_hot_vectors(bow_indices, tokenizer, device='cuda'):
+    if bow_indices is None:
+        return None
+
+    one_hot_bows_vectors = []
+    for single_bow in bow_indices:
+        single_bow = list(filter(lambda x: len(x) <= 1, single_bow))
+
+        single_bow = torch.tensor(single_bow).to(device)
+        num_words = single_bow.shape[0]
+        # print(num_words)
+        one_hot_bow = torch.zeros(num_words, tokenizer.vocab_size).to(device)
+        one_hot_bow.scatter_(1, single_bow, 1)
+        one_hot_bows_vectors.append(one_hot_bow)
+    return one_hot_bows_vectors
+
+def build_bows_one_hot_vectors_aff(bow_indices,affect_int, tokenizer, device='cuda'):
+    if bow_indices is None or affect_int is None:
+        return None, None
+
+    one_hot_bows_vectors = []
+    # print(np.array(bow_indices).shape)
+    for single_bow in bow_indices:
+        zipped = [[single_bow[i], affect_int[i]] for i in range(len(single_bow))]
+        single_bow_int = list(filter(lambda x: len(x[0]) <= 1, zipped))
+        single_bow = [single_bow_int[i][0] for i in range(len(single_bow_int)) ]
+        affect_ints = [single_bow_int[i][1] for i in range(len(single_bow_int)) ]
+        # print(single_bow, affect_ints)
+        # print(len(single_bow), len(affect_ints))
+        single_bow = torch.tensor(single_bow).to(device)
+        num_words = single_bow.shape[0]
+        # print(num_words)
+        one_hot_bow = torch.zeros(num_words, tokenizer.vocab_size).to(device)
+        one_hot_bow.scatter_(1, single_bow, 1)
+        one_hot_bows_vectors.append(one_hot_bow)
+    return one_hot_bows_vectors, affect_ints
+
+
+
 def full_text_generation(
         model,
         tokenizer,
@@ -391,6 +513,7 @@ def full_text_generation(
 
     return unpert_gen_tok_text, pert_gen_tok_texts, discrim_losses, losses_in_time
 
+
 def get_affect_words_and_int1 (affect_class):
   emotions = "https://raw.githubusercontent.com/ishikasingh/Affective-text-gen/master/NRC-AffectIntensity-Lexicon.txt"
   filepath = cached_path(emotions)
@@ -399,6 +522,145 @@ def get_affect_words_and_int1 (affect_class):
   words = [w.split("\t") for w in words]
   return [w[0] for w in words if w[-1] == affect_class], [float(w[1]) for w in words if w[-1] == affect_class]
 
+def run_pplm_example(
+        pretrained_model="gpt2-medium",
+        cond_text="",
+        affect_weight=0.2,
+        knob = None,
+        uncond=False,
+        num_samples=1,
+        bag_of_words=None,
+        bag_of_words_affect=None,
+        discrim=None,
+        discrim_weights=None,
+        discrim_meta=None,
+        class_label=-1,
+        length=100,
+        stepsize=0.02,
+        temperature=1.0,
+        top_k=10,
+        sample=True,
+        num_iterations=3,
+        grad_length=10000,
+        horizon_length=1,
+        window_length=0,
+        decay=False,
+        gamma=1.5,
+        gm_scale=0.9,
+        kl_scale=0.01,
+        seed=0,
+        no_cuda=False,
+        colorama=False,
+        verbosity='regular'
+):
+    # set Random seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    # set verbosiry
+    verbosity_level = VERBOSITY_LEVELS.get(verbosity.lower(), REGULAR)
+
+    # # set the device
+    # device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+
+    if discrim == 'generic':
+        set_generic_model_params(discrim_weights, discrim_meta)
+
+    if discrim is not None:
+        discriminator_pretrained_model = DISCRIMINATOR_MODELS_PARAMS[discrim][
+            "pretrained_model"
+        ]
+        if pretrained_model != discriminator_pretrained_model:
+            pretrained_model = discriminator_pretrained_model
+            if verbosity_level >= REGULAR:
+                print("discrim = {}, pretrained_model set "
+                "to discriminator's = {}".format(discrim, pretrained_model))
+
+    # # load pretrained model
+    # model = GPT2LMHeadModel.from_pretrained(
+    #     pretrained_model,
+    #     output_hidden_states=True
+    # )
+    # model.to(device)
+    # model.eval()
+
+    # # load tokenizer
+    # tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
+
+    # Freeze GPT-2 weights
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # figure out conditioning text
+    if uncond:
+        tokenized_cond_text = tokenizer.encode([tokenizer.bos_token],add_special_tokens=False)
+    else:
+        raw_text = cond_text
+        while not raw_text:
+            print("Did you forget to add `--cond_text`? ")
+            raw_text = input("Model prompt >>> ")
+        tokenized_cond_text = tokenizer.encode(tokenizer.bos_token + raw_text,add_special_tokens=False)
+    print("= Prefix of sentence =")
+    # generate unperturbed and perturbed texts
+
+    # full_text_generation returns:
+    # unpert_gen_tok_text, pert_gen_tok_texts, discrim_losses, losses_in_time
+    unpert_gen_tok_text, pert_gen_tok_texts, _, _ = full_text_generation(
+        model=model,
+        tokenizer=tokenizer,
+        affect_weight=affect_weight,
+        knob = knob,
+        context=tokenized_cond_text,
+        device=device,
+        num_samples=num_samples,
+        bag_of_words=bag_of_words,
+        bag_of_words_affect=bag_of_words_affect,
+        discrim=discrim,
+        class_label=class_label,
+        length=length,
+        stepsize=stepsize,
+        temperature=temperature,
+        top_k=top_k,
+        sample=sample,
+        num_iterations=num_iterations,
+        grad_length=grad_length,
+        horizon_length=horizon_length,
+        window_length=window_length,
+        decay=decay,
+        gamma=gamma,
+        gm_scale=gm_scale,
+        kl_scale=kl_scale,
+        verbosity_level=verbosity_level
+    )
+
+    # untokenize unperturbed text
+    unpert_gen_text = tokenizer.decode(unpert_gen_tok_text.tolist()[0])
+
+    if verbosity_level >= REGULAR:
+        print("=" * 80)
+    print("= Unperturbed generated text =")
+    print(unpert_gen_text)
+    print()
+
+    generated_texts = []
+
+    # iterate through the perturbed texts
+    for i, pert_gen_tok_text in enumerate(pert_gen_tok_texts):
+        try:
+            # untokenize unperturbed text
+            pert_gen_text = tokenizer.decode(pert_gen_tok_text.tolist()[0])
+            # print("= Perturbed generated text {} =".format(i + 1))
+            # print(pert_gen_text)
+            # print()
+        except:
+            pass
+
+        # keep the prefix, perturbed seq, original seq for each index
+        generated_texts.append(
+            (tokenized_cond_text, pert_gen_tok_text, unpert_gen_tok_text)
+        )
+
+    return pert_gen_text
 
 def generate_text_pplm(
         model,
@@ -588,142 +850,17 @@ def set_generic_model_params(discrim_weights, discrim_meta):
     meta['path'] = discrim_weights
     DISCRIMINATOR_MODELS_PARAMS['generic'] = meta
 
-def run_pplm_example(
-        pretrained_model="gpt2-medium",
-        cond_text="",
-        affect_weight=0.2,
-        knob = None,
-        uncond=False,
-        num_samples=1,
-        bag_of_words=None,
-        bag_of_words_affect=None,
-        discrim=None,
-        discrim_weights=None,
-        discrim_meta=None,
-        class_label=-1,
-        length=100,
-        stepsize=0.02,
-        temperature=1.0,
-        top_k=10,
-        sample=True,
-        num_iterations=3,
-        grad_length=10000,
-        horizon_length=1,
-        window_length=0,
-        decay=False,
-        gamma=1.5,
-        gm_scale=0.9,
-        kl_scale=0.01,
-        seed=0,
-        no_cuda=False,
-        colorama=False,
-        verbosity='regular'
-):
-    # set Random seed
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+# set the device
+device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
 
-    # set verbosiry
-    verbosity_level = VERBOSITY_LEVELS.get(verbosity.lower(), REGULAR)
+ # load pretrained model
+pretrained_model="gpt2-medium"
+model = GPT2LMHeadModel.from_pretrained(
+    pretrained_model,
+    output_hidden_states=True
+)
+model.to(device)
+model.eval()
 
-    # # set the device
-    device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
-
-    if discrim == 'generic':
-        set_generic_model_params(discrim_weights, discrim_meta)
-
-    if discrim is not None:
-        discriminator_pretrained_model = DISCRIMINATOR_MODELS_PARAMS[discrim][
-            "pretrained_model"
-        ]
-        if pretrained_model != discriminator_pretrained_model:
-            pretrained_model = discriminator_pretrained_model
-            if verbosity_level >= REGULAR:
-                print("discrim = {}, pretrained_model set "
-                "to discriminator's = {}".format(discrim, pretrained_model))
-
-    # # load pretrained model
-    model = GPT2LMHeadModel.from_pretrained(
-        pretrained_model,
-        output_hidden_states=True
-    )
-    model.to(device)
-    model.eval()
-
-    # load tokenizer
-    tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
-
-    # Freeze GPT-2 weights
-    for param in model.parameters():
-        param.requires_grad = False
-
-    # figure out conditioning text
-    if uncond:
-        tokenized_cond_text = tokenizer.encode([tokenizer.bos_token],add_special_tokens=False)
-    else:
-        raw_text = cond_text
-        while not raw_text:
-            print("Did you forget to add `--cond_text`? ")
-            raw_text = input("Model prompt >>> ")
-        tokenized_cond_text = tokenizer.encode(tokenizer.bos_token + raw_text,add_special_tokens=False)
-    print("= Prefix of sentence =")
-    # generate unperturbed and perturbed texts
-
-    # full_text_generation returns:
-    # unpert_gen_tok_text, pert_gen_tok_texts, discrim_losses, losses_in_time
-    unpert_gen_tok_text, pert_gen_tok_texts, _, _ = full_text_generation(
-        model=model,
-        tokenizer=tokenizer,
-        affect_weight=affect_weight,
-        knob = knob,
-        context=tokenized_cond_text,
-        device=device,
-        num_samples=num_samples,
-        bag_of_words=bag_of_words,
-        bag_of_words_affect=bag_of_words_affect,
-        discrim=discrim,
-        class_label=class_label,
-        length=length,
-        stepsize=stepsize,
-        temperature=temperature,
-        top_k=top_k,
-        sample=sample,
-        num_iterations=num_iterations,
-        grad_length=grad_length,
-        horizon_length=horizon_length,
-        window_length=window_length,
-        decay=decay,
-        gamma=gamma,
-        gm_scale=gm_scale,
-        kl_scale=kl_scale,
-        verbosity_level=verbosity_level
-    )
-
-    # untokenize unperturbed text
-    unpert_gen_text = tokenizer.decode(unpert_gen_tok_text.tolist()[0])
-
-    if verbosity_level >= REGULAR:
-        print("=" * 80)
-    print("= Unperturbed generated text =")
-    print(unpert_gen_text)
-    print()
-
-    generated_texts = []
-    pert_gen_text = ""
-    # iterate through the perturbed texts
-    for i, pert_gen_tok_text in enumerate(pert_gen_tok_texts):
-        try:
-            # untokenize unperturbed text
-            pert_gen_text = tokenizer.decode(pert_gen_tok_text.tolist()[0])
-            print("= Perturbed generated text {} =".format(i + 1))
-            print(pert_gen_text)
-            print()
-        except:
-            pass
-
-        # keep the prefix, perturbed seq, original seq for each index
-        generated_texts.append(
-            (tokenized_cond_text, pert_gen_tok_text, unpert_gen_tok_text)
-        )
-
-    return pert_gen_text
+# load tokenizer
+tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
