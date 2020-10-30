@@ -14,7 +14,12 @@ from transformers.file_utils import cached_path
 from transformers.modeling_gpt2 import GPT2LMHeadModel
 
 from ipywidgets import interact, interactive, fixed, interact_manual
+from flask_socketio import SocketIO, join_room, emit, send
 import ipywidgets as widgets
+
+resultContainer = {
+    "text":[]
+}
 
 class ClassificationHead(torch.nn.Module):
     """Classification Head for  transformer encoders"""
@@ -450,7 +455,6 @@ def full_text_generation(
     if bag_of_words_affect: 
       affect_words, affect_int = get_affect_words_and_int(bag_of_words_affect)
       bow_indices_affect.append([tokenizer.encode(word.strip(),add_prefix_space=True, add_special_tokens=False)for word in affect_words])
-    # print("aff1", affect_int)
     loss_type = PPLM_BOW
     if bag_of_words_affect:
       loss_type = BOW_AFFECT
@@ -824,6 +828,12 @@ def generate_text_pplm(
             last if output_so_far is None
             else torch.cat((output_so_far, last), dim=1)
         )
+
+        resultContainer["text"].append(tokenizer.decode(output_so_far.tolist()[0])[-1])
+        toemit = tokenizer.decode(output_so_far.tolist()[0])
+        toemit = toemit.split("<|endoftext|>")[1]
+        if perturb:
+            emit('word', {"value": toemit}, broadcast=True)
         if verbosity_level >= REGULAR:
             print(tokenizer.decode(output_so_far.tolist()[0]))
         if(tokenizer.decode(output_so_far.tolist()[0])[-1] == '.' ):

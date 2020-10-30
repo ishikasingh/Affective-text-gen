@@ -72,6 +72,13 @@ input[type=submit]:hover {
   clear: both;
 }
 
+/* body {
+  background-image: url('/static/back.jpg');
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-size: 100% 100%;
+} */
+
 /* Responsive layout - when the screen is less than 600px wide, make the two columns stack on top of each other instead of next to each other */
 @media screen and (max-width: 600px) {
   .col-25, .col-75, input[type=submit] {
@@ -85,12 +92,14 @@ input[type=submit]:hover {
           document.getElementById('knobValue').value=val/100; 
         }
 </script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/1.7.3/socket.io.min.js"></script>
 
 </head>
-<body>
+<body background="">
 
 
-<center><h2>Affect Text Generation</h2></center>
+<center><h2>Adapting a Language Model for Controlled Affective Text Generation</h2></center>
 
 <div class="container">
     <form method="POST" class="container">
@@ -98,7 +107,7 @@ input[type=submit]:hover {
             <div class="col-25">
                 <div class="row">
                     <label for="fname">Topic</label>
-                    <select name=topic>
+                    <select name="topic" id="topic">
                         {% for each in topics %}
                             <option value="{{each}}">{{each}}</option>
                         {% endfor %}
@@ -106,7 +115,7 @@ input[type=submit]:hover {
                 </div>
                 <div class="row">
                     <label for="fname">Affect</label>
-                    <select name=affect>
+                    <select name=affect id="affect">
                         {% for each in affects %}
                             <option value="{{each}}">{{each}}</option>
                         {% endfor %}
@@ -121,7 +130,7 @@ input[type=submit]:hover {
 
             <div class="col-75">
                 <label for="fname">Enter prefix Sentence</label>
-                <input type="text" id="fname" name="prefix" placeholder="The exists">
+                <input type="text" id="prompt" name="prefix" placeholder="The exists">
             </div>
         </div>
         
@@ -131,7 +140,37 @@ input[type=submit]:hover {
         
     </form>
     <p>{{result}}</p>
+    <div id="output" style="margin-left: 10%; margin-right: 10%;"></div>
 </div>
+
+<script type="text/javascript">
+      var socket = io.connect('http://' + document.domain + ':' + location.port);
+
+      socket.on('connect', function() {
+
+      var form = $('form').on( 'submit', function( e ) {
+          e.preventDefault()
+          let prompt = $('#prompt').val()
+          let topic = $('#topic').val()
+          let affect = $('#affect').val()
+          let knob = $('#knob').val()
+          console.log(prompt)
+          console.log(topic)
+          socket.emit('submit', {
+            prompt : prompt,
+            topic: topic,
+            affect: affect,
+            knob: knob,
+          })
+        })
+      })
+
+      socket.on('word', function( msg ) {
+        $("#output").html('<p>'+msg.value+'</p>');
+        // $('<p>'+msg.value+'</p>').appendTo('#output');
+        console.log( msg )
+      })
+  </script>
 
 </body>
 </html>

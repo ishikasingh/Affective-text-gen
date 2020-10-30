@@ -1,4 +1,5 @@
-from model import run_pplm_example
+from model import run_pplm_example, resultContainer
+from flask_socketio import SocketIO, join_room, emit, send
 
 # Knob =  0.8
 # Affect = "joy"
@@ -10,6 +11,7 @@ def generate(prompt, topic, affect, knob):
     print("Recieved request\n", "Prompt: ", prompt, "topic: ", topic, "affect: ", affect, "knob: ", knob)
     if prompt == "Enter prefix" or prompt == "":
         return "", False
+    emit('word', {"value": "Generating..."}, broadcast=True)
     result = run_pplm_example(
           affect_weight=1,  # it is the convergence rate of affect loss, don't change it :-p
           knob = knob, # 0-1, play with it as much as you want
