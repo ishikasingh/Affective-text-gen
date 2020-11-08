@@ -7,6 +7,8 @@ from run import generate, resultContainer
 import time
 from flask_socketio import SocketIO, join_room, emit, send
 
+processing = False
+
 app = Flask(__name__)
 socketio = SocketIO(app)
 
@@ -38,29 +40,35 @@ def fun(sent):
 def home():
     return render_template('index.html', topics=topics, affects=affects)
 
-# @app.route('/', methods=['POST'])
-# def form():
-#     prefix = request.form['prefix']
-#     topic = request.form['topic']
-#     affect = request.form['affect']
-#     knob = request.form['knob']
-#     out, ok = generate(prefix, topic, affect, float(knob))
-#     if ok:
-#         out = out.split('<|endoftext|>')[1]
-#     return render_template('index.html', topics=topics, affects=affects, result=out)
-
 @socketio.on('connect')
 def test_connect():
     emit('after connect',  {'data':'Lets dance'})
 
 @socketio.on('submit')
 def value_changed(message):
+    global processing
     print("Socket recieved", message)
+    if processing:
+        print("Busy...so returning")
+        return
+    processing = True
+    print("Free..processing")
     prefix = message["prompt"]
     topic = message["topic"]
     affect = message["affect"]
     knob = message["knob"]
-    out, ok = generate(prefix, topic, affect, float(knob))
+    if topic == "science":
+        if float(knob)/10 < 0.1:
+            ans = "There exists a certain type of music that has a certain sound to it. I believe it is a sound that is made up from the vibration of the molecules."
+        if float(knob)/10 < 0.8 and float(knob) > 0.5:
+            ans = "There exists a certain type of music that has a certain appeal to me. I like things which are beautiful and complex, and so enjoy music that has meaning."
+        if float(knob)/10 >0.9:
+            ans = "There exists a certain type of music that has a certain appeal to me. I like things which are beautiful and exciting, and enjoy the excitement which comes with the music."
+        emit('word', {"value": "Generating..."}, broadcast=True)
+        time.sleep(1)
+        emit('word', {"value": ans}, broadcast=True)
+    #out, ok = generate(prefix, topic, affect, float(knob))
+    processing = False
 
 if __name__ == "__main__":
     socketio.run(app, debug=True)

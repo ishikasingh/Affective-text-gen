@@ -220,7 +220,7 @@ def perturb_past(
                 bow_logits = torch.mm(probs, torch.t(one_hot_bow))
                 #print(type(bow_logits))
                 bow_loss = -torch.log(torch.sum(bow_logits))
-                #print(bow_loss)
+                print("topic loss:", bow_loss)
                 loss +=  bow_loss
                 loss_list.append(bow_loss)
             if loss_type == BOW_AFFECT:
@@ -228,9 +228,9 @@ def perturb_past(
                   bow_logits = torch.mm(probs, torch.t(one_hot_bow))
                  # print(bow_logits.size(), torch.FloatTensor(affect_int).size())
                   bow_loss = -torch.log(torch.matmul(bow_logits, torch.t(torch.FloatTensor(gaussian(affect_int, knob, .1)).to(device))))#-torch.log(torch.sum(bow_logits))#
-                  # print(bow_loss)
 
-                  loss += affect_weight * bow_loss[0]
+                  loss += affect_weight * bow_loss[0]*knob
+                  print("affect loss:", affect_weight * bow_loss[0]*knob)
                   loss_list.append(bow_loss)
             if verbosity_level >= VERY_VERBOSE:
                 print(" pplm_bow_loss:", loss.data.cpu().numpy())
@@ -565,7 +565,7 @@ def run_pplm_example(
     verbosity_level = VERBOSITY_LEVELS.get(verbosity.lower(), REGULAR)
 
     # # set the device
-    # device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
+    device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
 
     if discrim == 'generic':
         set_generic_model_params(discrim_weights, discrim_meta)
@@ -580,16 +580,17 @@ def run_pplm_example(
                 print("discrim = {}, pretrained_model set "
                 "to discriminator's = {}".format(discrim, pretrained_model))
 
-    # # load pretrained model
-    # model = GPT2LMHeadModel.from_pretrained(
-    #     pretrained_model,
-    #     output_hidden_states=True
-    # )
-    # model.to(device)
-    # model.eval()
+    # load pretrained model
+    emit('word', {"value": "Loading model..."}, broadcast=True)
+    model = GPT2LMHeadModel.from_pretrained(
+        pretrained_model,
+        output_hidden_states=True
+    )
+    model.to(device)
+    model.eval()
 
-    # # load tokenizer
-    # tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
+    # load tokenizer
+    tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
 
     # Freeze GPT-2 weights
     for param in model.parameters():
@@ -863,14 +864,24 @@ def set_generic_model_params(discrim_weights, discrim_meta):
 # set the device
 device = "cuda" if torch.cuda.is_available() and not no_cuda else "cpu"
 
- # load pretrained model
-pretrained_model="gpt2-medium"
-model = GPT2LMHeadModel.from_pretrained(
+#  # load pretrained model
+# pretrained_model="gpt2-medium"
+# model = GPT2LMHeadModel.from_pretrained(
+#     pretrained_model,
+#     output_hidden_states=True
+# )
+# model.to(device)
+# model.eval()
+
+# # load tokenizer
+# tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
+
+def load_model():
+    global model
+    pretrained_model="gpt2-medium"
+    model = GPT2LMHeadModel.from_pretrained(
     pretrained_model,
     output_hidden_states=True
-)
-model.to(device)
-model.eval()
-
-# load tokenizer
-tokenizer = GPT2Tokenizer.from_pretrained(pretrained_model)
+    )
+    model.to(device)
+    model.eval()

@@ -89,12 +89,12 @@ input[type=submit]:hover {
 </style>
 <script>
     function updateTextInput(val) {
-          document.getElementById('knobValue').value=val/100; 
+          document.getElementById('knobValue').value=val/10; 
         }
 </script>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/1.7.3/socket.io.min.js"></script>
-
+<title>Affective Text Generation</title>
 </head>
 <body background="">
 
@@ -123,13 +123,13 @@ input[type=submit]:hover {
                 </div>
                 <div class="row">
                     <label for="fname">Affect Intensity</label>
-                    <input type="range" id="knob" onchange="updateTextInput(this.value);" name="knob" min="0" max="100" value="5"> 
+                    <input type="range" id="knob" onchange="updateTextInput(this.value);" name="knob" min="0" max="10" value="0"> 
                     <output id="knobValue">0</output>
                 </div>
             </div>
 
             <div class="col-75">
-                <label for="fname">Enter prefix Sentence</label>
+                <label for="fname">Prompt</label>
                 <input type="text" id="prompt" name="prefix" placeholder="The exists">
             </div>
         </div>

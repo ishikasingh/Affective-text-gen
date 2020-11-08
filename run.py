@@ -1,4 +1,4 @@
-from model import run_pplm_example, resultContainer
+from model import run_pplm_example, resultContainer, load_model
 from flask_socketio import SocketIO, join_room, emit, send
 
 # Knob =  0.8
@@ -7,8 +7,10 @@ from flask_socketio import SocketIO, join_room, emit, send
 # Prompt = "There was a"
 
 def generate(prompt, topic, affect, knob):
-    knob/=100
-    print("Recieved request\n", "Prompt: ", prompt, "topic: ", topic, "affect: ", affect, "knob: ", knob)
+    # emit('word', {"value": "Loading model..."}, broadcast=True)
+    # load_model()
+    knob/=10
+    print("generate called\n", "Prompt: ", prompt, "topic: ", topic, "affect: ", affect, "knob: ", knob)
     if prompt == "Enter prefix" or prompt == "":
         return "", False
     emit('word', {"value": "Generating..."}, broadcast=True)
