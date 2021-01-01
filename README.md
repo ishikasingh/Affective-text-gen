@@ -5,15 +5,12 @@ To generate the desired affective text (emotion category and intensity), use the
 ## Citation 
 If you want to use our work in your research, please cite:
 ```
-@inproceedings{,
-  author    = {a and
-               b and
-               c and
-               d and
-               e},
-  title     = {},
-  booktitle = {{}},
-  pages     = {},
-  year      = {2020}
+@misc{singh2020adapting,
+      title={Adapting a Language Model for Controlled Affective Text Generation}, 
+      author={Ishika Singh and Ahsan Barkati and Tushar Goswamy and Ashutosh Modi},
+      year={2020},
+      eprint={2011.04000},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
 }
 ```
